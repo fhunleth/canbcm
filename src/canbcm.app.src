@@ -1,0 +1,8 @@
+%% -*- mode: erlang;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+{application,canbcm,
+             [{description,"CAN Broadcast Manager Interface"},
+              {vsn,"0.0.1"},
+              {modules,[canbcm]},
+              {registered,[]},
+              {applications,[kernel,stdlib]}
+              ]}.

@@ -1,0 +1,5 @@
+deps*
+ebin/*
+*.beam
+*.o
+priv
