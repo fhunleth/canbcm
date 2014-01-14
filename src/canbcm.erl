@@ -19,7 +19,8 @@
 
 -record(state,
         { device            :: string(),
-          port              :: port()
+          port              :: port(),
+	  subscribers       :: [pid()]  %% currently not right, since doesn't remember subscription
         }).
 
 %%%===================================================================
@@ -29,11 +30,11 @@
 -spec start_link(atom()) ->
                     {ok, pid()} | ignore | {error, _}.
 start_link(Device) ->
-    gen_server:start_link(?MODULE, [Device], []).
+    gen_server:start_link({local, Device}, ?MODULE, [Device], []).
 
 -spec release(atom()) -> ok.
 release(Device) ->
-    gen_server:cast(Device, release).
+    gen_server:call(Device, release).
 
 -spec send(atom(), non_neg_integer(), binary()) -> ok | {error, _}.
 send(Device, CanId, Data) ->
@@ -70,10 +71,11 @@ unsubscribe(Device, CanId) ->
 %%%===================================================================
 
 init([Device]) ->
-    PortPath = code:priv_dir(erlang_ale) ++ "/canbcm",
+    PortPath = code:priv_dir(canbcm) ++ "/canbcm",
     Port = erlang:open_port({spawn, PortPath}, [{packet, 2}, binary]),
     State = #state{device=Device,
-		   port=Port},
+		   port=Port,
+		   subscribers=ordsets:new()},
     send_to_port(Port, {open, Device}),
     {ok, State}.
 
@@ -81,25 +83,28 @@ handle_call(release, _From, State) ->
     {stop, normal, ok, State};
 handle_call({send, CanId, Data}, _From, #state{port=Port}=State) ->
     send_to_port(Port, {send, CanId, Data}),
-    {ok,  State};
+    {reply, ok, State};
 handle_call({add_send_job, Period, CanId, Data}, _From, #state{port=Port}=State) ->
     send_to_port(Port, {add_send_job, Period, CanId, Data}),
-    {ok,  State};
+    {reply, ok, State};
 handle_call({update_send_job, CanId, Data}, _From, #state{port=Port}=State) ->
     send_to_port(Port, {update_send_job, CanId, Data}),
-    {ok,  State};
+    {reply, ok, State};
 handle_call({delete_send_job, CanId}, _From, #state{port=Port}=State) ->
     send_to_port(Port, {delete_send_job, CanId}),
-    {ok,  State};
-handle_call({filter, Period, CanId, Data}, _From, #state{port=Port}=State) ->
+    {reply, ok, State};
+handle_call({filter, Period, CanId, Data}, {Pid,_Tag}, #state{port=Port,subscribers=Subscribers}=State) ->
+    NewSubscribers = ordsets:add_element(Pid, Subscribers),
     send_to_port(Port, {filter, Period, CanId, Data}),
-    {ok,  State};
-handle_call({subscribe, Period, CanId}, _From, #state{port=Port}=State) ->
+    {reply, ok, State#state{subscribers=NewSubscribers}};
+handle_call({subscribe, Period, CanId}, {Pid,_Tag}, #state{port=Port,subscribers=Subscribers}=State) ->
+    NewSubscribers = ordsets:add_element(Pid, Subscribers),
     send_to_port(Port, {subscribe, Period, CanId}),
-    {ok,  State};
-handle_call({unsubscribe, CanId}, _From, #state{port=Port}=State) ->
+    {reply, ok, State#state{subscribers=NewSubscribers}};
+handle_call({unsubscribe, CanId}, {Pid,_Tag}, #state{port=Port,subscribers=Subscribers}=State) ->
+    NewSubscribers = ordsets:del_element(Pid, Subscribers),
     send_to_port(Port, {unsubscribe, CanId}),
-    {ok,  State};
+    {reply, ok, State#state{subscribers=NewSubscribers}};
 handle_call({from_port, Msg}, _From, State) ->
     io:format("Got a message from the port: ~p~n", [Msg]),
     Reply = ok,
@@ -112,8 +117,14 @@ handle_cast(Msg, State) ->
     io:format("cast got: ~p~n", [Msg]),
     {noreply, State}.
 
+handle_info({Port, {data, RawMsg}},
+            #state{device=Device,port=Port,subscribers=Subscribers}=State) ->
+    Msg = binary_to_term(RawMsg),
+    io:format("~p: ~p~n", [Device, Msg]),
+    [ Pid ! Msg || Pid <- Subscribers ],
+    {noreply, State};
 handle_info(Msg, State) ->
-    io:format("handle_info got: ~p~n", [Msg]),
+    io:format("handle_info got unexpected: ~p~n", [Msg]),
     {noreply, State}.
 
 terminate(_Reason, #state{port=Port}=_State) ->

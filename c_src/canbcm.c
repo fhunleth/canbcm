@@ -221,19 +221,15 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
 	errx(EXIT_FAILURE, "erl_element(emsgtype)");
 
     if (strcmp(ERL_ATOM_PTR(emsgtype), "open") == 0) {
-	ETERM *arg1p = erl_element(2, emsg);
-	if (arg1p == NULL)
-	    errx(EXIT_FAILURE, "init: arg1p was NULL");
+	// TODO: consider moving open to the command line arguments, since
+	//       the port isn't too useful until open is called anyway.
+	ETERM *eifname = erl_element(2, emsg);
+	if (eifname == NULL)
+	    errx(EXIT_FAILURE, "init: eifname was NULL");
 
-	ETERM *resp;
-	if (can_open(can, ERL_ATOM_PTR(arg1p)))
-	    resp = erl_format("ok");
-	else
-	    resp = erl_format("{error, can_init_fail}");
+	can_open(can, ERL_ATOM_PTR(eifname));
 
-	erlcmd_send(resp);
-	erl_free_term(arg1p);
-	erl_free_term(resp);
+	erl_free_term(eifname);
     } else if (strcmp(ERL_ATOM_PTR(emsgtype), "release") == 0) {
 	can_release(can);
     } else if (strcmp(ERL_ATOM_PTR(emsgtype), "send") == 0) {
@@ -258,6 +254,66 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
 	    err(EXIT_FAILURE, "sendto(TX_SEND)");
 
 	erl_free_term(edata);
+	erl_free_term(ecanid);
+    } else if (strcmp(ERL_ATOM_PTR(emsgtype), "add_send_job") == 0) {
+	ETERM *eperiod = erl_element(2, emsg);
+	ETERM *ecanid = erl_element(3, emsg);
+	ETERM *edata = erl_element(4, emsg);
+
+	struct can_msg msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_head.opcode = TX_SETUP;
+	msg.msg_head.flags = SETTIMER | STARTTIMER;
+	msg.msg_head.ival2 = seconds_to_tv(ERL_FLOAT_VALUE(eperiod));
+	msg.msg_head.nframes = 1;
+	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+	msg.frame.can_dlc = ERL_BIN_SIZE(edata);
+	if (msg.frame.can_dlc > 8)
+	    errx(EXIT_FAILURE, "Can't send more than 8 bytes: %d", msg.frame.can_dlc);
+	memcpy(msg.frame.data, ERL_BIN_PTR(edata), msg.frame.can_dlc);
+
+	if (sendto(can->fd,
+		   &msg, sizeof(msg), 0,
+		   (struct sockaddr *) &can->caddr, sizeof(can->caddr)) < 0)
+	    err(EXIT_FAILURE, "sendto(TX_SETUP)");
+
+	erl_free_term(edata);
+	erl_free_term(ecanid);
+	erl_free_term(eperiod);
+    } else if (strcmp(ERL_ATOM_PTR(emsgtype), "update_send_job") == 0) {
+	ETERM *ecanid = erl_element(2, emsg);
+	ETERM *edata = erl_element(3, emsg);
+
+	struct can_msg msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_head.opcode = TX_SETUP;
+	msg.msg_head.nframes = 1;
+	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+	msg.frame.can_dlc = ERL_BIN_SIZE(edata);
+	if (msg.frame.can_dlc > 8)
+	    errx(EXIT_FAILURE, "Can't send more than 8 bytes: %d", msg.frame.can_dlc);
+	memcpy(msg.frame.data, ERL_BIN_PTR(edata), msg.frame.can_dlc);
+
+	if (sendto(can->fd,
+		   &msg, sizeof(msg), 0,
+		   (struct sockaddr *) &can->caddr, sizeof(can->caddr)) < 0)
+	    err(EXIT_FAILURE, "sendto(TX_SETUP2)");
+
+	erl_free_term(edata);
+	erl_free_term(ecanid);
+    } else if (strcmp(ERL_ATOM_PTR(emsgtype), "delete_send_job") == 0) {
+	ETERM *ecanid = erl_element(2, emsg);
+
+	struct can_msg msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_head.opcode = TX_DELETE;
+	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+
+	if (sendto(can->fd,
+		   &msg, sizeof(msg), 0,
+		   (struct sockaddr *) &can->caddr, sizeof(can->caddr)) < 0)
+	    err(EXIT_FAILURE, "sendto(TX_DELETE)");
+
 	erl_free_term(ecanid);
     } else if (strcmp(ERL_ATOM_PTR(emsgtype), "subscribe") == 0) {
 	ETERM *eperiod = erl_element(2, emsg);
