@@ -105,10 +105,6 @@ handle_call({unsubscribe, CanId}, {Pid,_Tag}, #state{port=Port,subscribers=Subsc
     NewSubscribers = ordsets:del_element(Pid, Subscribers),
     send_to_port(Port, {unsubscribe, CanId}),
     {reply, ok, State#state{subscribers=NewSubscribers}};
-handle_call({from_port, Msg}, _From, State) ->
-    io:format("Got a message from the port: ~p~n", [Msg]),
-    Reply = ok,
-    {reply, Reply, State};
 handle_call(Msg, _From, State) ->
     io:format("handle_call got: ~p~n", [Msg]),
     {reply, huh, State}.
@@ -118,9 +114,8 @@ handle_cast(Msg, State) ->
     {noreply, State}.
 
 handle_info({Port, {data, RawMsg}},
-            #state{device=Device,port=Port,subscribers=Subscribers}=State) ->
+            #state{device=_Device,port=Port,subscribers=Subscribers}=State) ->
     Msg = binary_to_term(RawMsg),
-    io:format("~p: ~p~n", [Device, Msg]),
     [ Pid ! Msg || Pid <- Subscribers ],
     {noreply, State};
 handle_info(Msg, State) ->
