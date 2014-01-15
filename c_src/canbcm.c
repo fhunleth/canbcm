@@ -209,7 +209,7 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
 	errx(EXIT_FAILURE, "Message too long");
 
     /* Check whether we've received the entire message */
-    if (msglen + sizeof(uint16_t) < handler->index)
+    if (msglen + sizeof(uint16_t) > handler->index)
 	return 0;
 
     ETERM *emsg = erl_decode(handler->buffer + sizeof(uint16_t));
@@ -375,14 +375,14 @@ void erlcmd_process(struct erlcmd *handler, struct candev *can)
 	/* Everything else is unexpected. */
 	err(EXIT_FAILURE, "read");
     } else if (amount_read == 0) {
-	/* EOF. Erlang process was terminated. This happens after a release or if there was an error. */
+	/* EOF. Erlang process was terminated. This happens after a
+	   release or if there was an error. */
 	exit(EXIT_SUCCESS);
     }
 
     handler->index += amount_read;
     for (;;) {
 	ssize_t bytes_processed = erlcmd_dispatch(handler, can);
-
 	if (bytes_processed == 0) {
 	    /* Only have part of the command to process. */
 	    break;
