@@ -181,15 +181,40 @@ void erlcmd_send(ETERM *response)
     } while (wrote < len);
 }
 
-static struct timeval seconds_to_tv(double seconds)
+/**
+ * @brief Helper function to turn a period from Erlang into a timeval
+ */
+static struct timeval eperiod_to_tv(ETERM *eperiod)
 {
     struct timeval tv;
+    if (ERL_IS_FLOAT(eperiod)) {
+        double seconds = ERL_FLOAT_VALUE(eperiod);
 
-    double wholepart = floor(seconds);
-    tv.tv_sec = (int) wholepart;
-    tv.tv_usec = (int) ((seconds - wholepart) * 1000000.0);
+	double wholepart = floor(seconds);
+	tv.tv_sec = (int) wholepart;
+	tv.tv_usec = (int) ((seconds - wholepart) * 1000000.0);
+    } else {
+	tv.tv_sec = ERL_INT_VALUE(eperiod);
+	tv.tv_usec = 0;
+    }
 
     return tv;
+}
+
+/**
+ * @brief Helper function to turn Erlang CAN IDs into canid_ts
+ */
+static canid_t ecanid_to_canid(ETERM *ecanid)
+{
+    canid_t id = ERL_INT_VALUE(ecanid);
+
+    // The assumption is that if the CAN ID is bigger than 8 bits,
+    // then it's an extended frame ID. This flag may be better
+    // applied in Erlang if this assumption is bad.
+    if (id > 255)
+	id = id | CAN_EFF_FLAG;
+
+    return id;
 }
 
 /**
@@ -236,13 +261,11 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
 	ETERM *ecanid = erl_element(2, emsg);
 	ETERM *edata = erl_element(3, emsg);
 
-	// Set CAN_EFF_FLAG if necessary?
-
 	struct can_msg msg;
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_head.opcode = TX_SEND;
 	msg.msg_head.nframes = 1;
-	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+	msg.frame.can_id = msg.msg_head.can_id = ecanid_to_canid(ecanid);
 	msg.frame.can_dlc = ERL_BIN_SIZE(edata);
 	if (msg.frame.can_dlc > 8)
 	    errx(EXIT_FAILURE, "Can't send more than 8 bytes: %d", msg.frame.can_dlc);
@@ -264,9 +287,9 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_head.opcode = TX_SETUP;
 	msg.msg_head.flags = SETTIMER | STARTTIMER;
-	msg.msg_head.ival2 = seconds_to_tv(ERL_FLOAT_VALUE(eperiod));
+	msg.msg_head.ival2 = eperiod_to_tv(eperiod);
 	msg.msg_head.nframes = 1;
-	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+	msg.frame.can_id = msg.msg_head.can_id = ecanid_to_canid(ecanid);
 	msg.frame.can_dlc = ERL_BIN_SIZE(edata);
 	if (msg.frame.can_dlc > 8)
 	    errx(EXIT_FAILURE, "Can't send more than 8 bytes: %d", msg.frame.can_dlc);
@@ -288,7 +311,7 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_head.opcode = TX_SETUP;
 	msg.msg_head.nframes = 1;
-	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+	msg.frame.can_id = msg.msg_head.can_id = ecanid_to_canid(ecanid);
 	msg.frame.can_dlc = ERL_BIN_SIZE(edata);
 	if (msg.frame.can_dlc > 8)
 	    errx(EXIT_FAILURE, "Can't send more than 8 bytes: %d", msg.frame.can_dlc);
@@ -307,7 +330,7 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
 	struct can_msg msg;
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_head.opcode = TX_DELETE;
-	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+	msg.frame.can_id = msg.msg_head.can_id = ecanid_to_canid(ecanid);
 
 	if (sendto(can->fd,
 		   &msg, sizeof(msg), 0,
@@ -319,15 +342,13 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
 	ETERM *eperiod = erl_element(2, emsg);
 	ETERM *ecanid = erl_element(3, emsg);
 
-	// Set CAN_EFF_FLAG if necessary?
-
 	struct can_msg msg;
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_head.opcode = RX_SETUP;
 	msg.msg_head.flags = RX_FILTER_ID | SETTIMER;
 	msg.msg_head.nframes = 1;
-	msg.msg_head.ival2 = seconds_to_tv(ERL_FLOAT_VALUE(eperiod));
-	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+	msg.msg_head.ival2 = eperiod_to_tv(eperiod);
+	msg.frame.can_id = msg.msg_head.can_id = ecanid_to_canid(ecanid);
 	if (sendto(can->fd,
 		   &msg, sizeof(msg), 0,
 		   (struct sockaddr *) &can->caddr, sizeof(can->caddr)) < 0)
@@ -338,13 +359,11 @@ ssize_t erlcmd_dispatch(struct erlcmd *handler, struct candev *can)
     } else if (strcmp(ERL_ATOM_PTR(emsgtype), "unsubscribe") == 0) {
 	ETERM *ecanid = erl_element(2, emsg);
 
-	// Set CAN_EFF_FLAG if necessary?
-
 	struct can_msg msg;
 	memset(&msg, 0, sizeof(msg));
 	msg.msg_head.opcode = RX_DELETE;
 	msg.msg_head.nframes = 1;
-	msg.frame.can_id = msg.msg_head.can_id = ERL_INT_VALUE(ecanid);
+	msg.frame.can_id = msg.msg_head.can_id = ecanid_to_canid(ecanid);
 	if (sendto(can->fd,
 		   &msg, sizeof(msg), 0,
 		   (struct sockaddr *) &can->caddr, sizeof(can->caddr)) < 0)

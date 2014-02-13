@@ -9,7 +9,7 @@ application provides access to this interface.
 ```erlang
 1> canbcm:start_link(can0).
 {ok,<0.172.0>}
-1> canbcm:subscribe(can0, 10, 0).   %% subscribe to messages with can_id 0
+1> canbcm:subscribe(can0, 10, 0).   %% subscribe to messages with can_id 0 with a period of 10 seconds
 ok
 2> canbcm:send(can0, 0, <<0, 1, 2, 4, 5>>).   %% send message with can_id 0 and content 0,1,2,4,5
 ok
